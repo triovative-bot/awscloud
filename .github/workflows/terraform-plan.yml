@@ -1,6 +1,20 @@
 name: 'Terraform Plan'
 
 on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+      auto_approve:
+        description: 'Auto-approve the deployment'
+        required: false
+        default: false
+        type: boolean
 
 env:
   TF_VERSION: '1.7.4'
