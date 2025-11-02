@@ -2,10 +2,11 @@ name: 'Terraform Deploy - Dev'
 
 on:
   push:
-    branches: ['main']
+    branches: ['develop', 'feature/*']
     paths:
-      - 'terraform/**'
-      - '.github/workflows/**'
+      - 'terraform/modules/**'
+      - 'terraform/environments/dev/**'
+      - '.github/workflows/terraform-dev.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -45,20 +46,18 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.DEV_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.DEV_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        id: init
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform init
 
       - name: Terraform Validate
-        id: validate
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform validate
@@ -73,32 +72,26 @@ jobs:
             -out=plan.tfplan
 
       - name: Terraform Apply
-        id: apply
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.auto_approve == true)
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform apply -auto-approve plan.tfplan
 
-      - name: Terraform Apply (Manual Approval)
-        id: apply_manual
+      - name: Manual Approval for Workflow Dispatch
         if: github.event_name == 'workflow_dispatch' && inputs.auto_approve == false
         run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
-          terraform apply plan.tfplan
+          echo "Manual approval required. Run terraform apply manually or set auto_approve to true."
+          exit 1
 
-      - name: Update outputs in summary
+      - name: Update Deployment Status
+        if: success()
         run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
-          terraform output -json > outputs.json
-          echo "## Terraform Outputs (${{ env.ENVIRONMENT }})" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat outputs.json >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Terraform deployment to ${{ env.ENVIRONMENT }} completed successfully!"
 
   notify:
     name: 'Notify Deployment Status'
-    needs: terraform
     runs-on: ubuntu-latest
+    needs: terraform
     if: always()
 
     steps:
@@ -107,15 +100,6 @@ jobs:
         uses: 8398a7/action-slack@v3
         with:
           status: failure
-          text: '🚨 Terraform deployment to DEV environment failed!'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-      - name: Notify Slack on Success
-        if: needs.terraform.result == 'success'
-        uses: 8398a7/action-slack@v3
-        with:
-          status: success
-          text: '✅ Terraform deployment to DEV environment completed successfully!'
+          text: 'Terraform deployment to ${{ env.ENVIRONMENT }} failed!'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
