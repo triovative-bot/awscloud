@@ -1,6 +1,11 @@
 name: 'Terraform Deploy - Prod'
 
 on:
+  push:
+    branches: ['main']
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       environment:
