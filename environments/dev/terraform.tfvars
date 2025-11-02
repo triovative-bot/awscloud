@@ -10,4 +10,4 @@ instance_count = 1
 instance_type  = "t3.micro"
 
 # EKS Configuration
-k8s_version = "1.28"
+k8s_version = "1.33"
