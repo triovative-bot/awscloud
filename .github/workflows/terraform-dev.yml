@@ -2,7 +2,7 @@ name: 'Terraform Deploy - Dev'
 
 on:
   push:
-    branches: ['develop', 'feature/*']
+    branches: ['main']
     paths:
       - 'terraform/modules/**'
       - 'terraform/environments/dev/**'
