@@ -4,8 +4,9 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'terraform/**'
-      - '.github/workflows/**'
+      - 'terraform/modules/**'
+      - 'terraform/environments/prod/**'
+      - '.github/workflows/terraform-prod.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -31,6 +32,8 @@ jobs:
     name: 'Terraform Plan - Prod'
     runs-on: ubuntu-latest
     environment: prod
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -42,20 +45,18 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        id: init
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform init
 
       - name: Terraform Validate
-        id: validate
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform validate
@@ -69,18 +70,18 @@ jobs:
             -input=false \
             -out=plan.tfplan
 
-      - name: Upload Terraform Plan
+      - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-prod
-          path: terraform/environments/${{ env.ENVIRONMENT }}/plan.tfplan
+          path: terraform/environments/prod/plan.tfplan
           retention-days: 1
 
   terraform-apply:
     name: 'Terraform Apply - Prod'
     runs-on: ubuntu-latest
-    needs: terraform-plan
     environment: prod
+    needs: terraform-plan
     permissions:
       contents: read
       id-token: write
@@ -89,74 +90,63 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-prod
+          path: terraform/environments/prod/
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download Terraform Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan-prod
-          path: terraform/environments/${{ env.ENVIRONMENT }}
-
       - name: Terraform Init
-        id: init
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform init
 
       - name: Terraform Apply
-        id: apply
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.auto_approve == true)
         run: |
           cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform apply -auto-approve plan.tfplan
 
-      - name: Terraform Apply (Manual)
-        id: apply_manual
+      - name: Manual Approval for Workflow Dispatch
         if: github.event_name == 'workflow_dispatch' && inputs.auto_approve == false
         run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
-          terraform apply plan.tfplan
-
-      - name: Update outputs in summary
-        run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
-          terraform output -json > outputs.json
-          echo "## Terraform Outputs (${{ env.ENVIRONMENT }})" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat outputs.json >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Manual approval required for production deployment."
+          echo "Run terraform apply manually or set auto_approve to true in workflow dispatch."
+          exit 1
 
   notify:
-    name: 'Notify Deployment Status'
-    needs: terraform-apply
+    name: 'Notify Production Deployment'
     runs-on: ubuntu-latest
+    needs: terraform-apply
     if: always()
 
     steps:
-      - name: Notify Slack on Failure
-        if: needs.terraform-apply.result == 'failure'
-        uses: 8398a7/action-slack@v3
-        with:
-          status: failure
-          text: '🚨 Terraform deployment to PROD environment failed!'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
       - name: Notify Slack on Success
         if: needs.terraform-apply.result == 'success'
         uses: 8398a7/action-slack@v3
         with:
           status: success
-          text: '✅ Terraform deployment to PROD environment completed successfully!'
+          text: 'Production deployment completed successfully! :rocket:'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack on Failure
+        if: needs.terraform-apply.result == 'failure'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: 'Production deployment failed! :x:'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
